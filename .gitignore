@@ -1,1 +1,4 @@
 /.idea/
+keys/**
+.work/**
+publish/**
