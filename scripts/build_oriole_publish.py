@@ -21,7 +21,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -343,6 +342,19 @@ def _generate_custota_files(ota_zip: Path, ota_version: str) -> None:
     )
 
 
+def _cleanup_old_versions() -> None:
+    zips = sorted(
+        publish_dir.glob(f"{DEVICE_ID}-*-magisk-*.zip"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for old_zip in zips[2:]:
+        old_zip.unlink()
+        csig = publish_dir / f"{old_zip.name}.csig"
+        if csig.exists():
+            csig.unlink()
+
+
 def main() -> int:
     _require_tools(["git", "ssh-keygen", "uv"])
 
@@ -355,43 +367,20 @@ def main() -> int:
     ota_target = f"{DEVICE_ID}-{GRAPHENE_TYPE}-{ota_version}"
     _eprint(f"OTA target: {ota_target}")
 
-    backup_dir: Path | None = None
-    old_dir = publish_dir / "old"
-
     publish_dir.mkdir(parents=True, exist_ok=True)
-    old_dir.mkdir(parents=True, exist_ok=True)
 
-    if any(publish_dir.iterdir()):
-        suffix = time.strftime("%Y%m%d-%H%M%S")
-        backup_dir = old_dir / suffix
-        backup_dir.mkdir(parents=True, exist_ok=True)
+    magisk_apk = _download_dependencies(magisk_version, ota_target)
+    ota_zip = _patch_ota(
+        ota_target=ota_target,
+        ota_version=ota_version,
+        magisk_version=magisk_version,
+        magisk_apk=magisk_apk,
+    )
 
-        for entry in publish_dir.iterdir():
-            if entry.name == "old":
-                continue
-            shutil.move(str(entry), str(backup_dir / entry.name))
-
-    try:
-        magisk_apk = _download_dependencies(magisk_version, ota_target)
-        ota_zip = _patch_ota(
-            ota_target=ota_target,
-            ota_version=ota_version,
-            magisk_version=magisk_version,
-            magisk_apk=magisk_apk,
-        )
-
-        publish_zip = publish_dir / ota_zip.name
-        shutil.copy2(ota_zip, publish_zip)
-        _generate_custota_files(publish_zip, ota_version)
-    except Exception:
-        _eprint("Build failed. Keeping publish backup.")
-        raise
-    else:
-        if backup_dir and backup_dir.exists():
-            shutil.rmtree(backup_dir)
-        for old_backup in old_dir.iterdir():
-            if old_backup.is_dir():
-                shutil.rmtree(old_backup)
+    publish_zip = publish_dir / ota_zip.name
+    shutil.copy2(ota_zip, publish_zip)
+    _generate_custota_files(publish_zip, ota_version)
+    _cleanup_old_versions()
 
     _eprint(f"Done. Publish folder: {publish_dir}")
     return 0
