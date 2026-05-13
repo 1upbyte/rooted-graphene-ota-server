@@ -25,6 +25,7 @@ import time
 import urllib.request
 import zipfile
 from pathlib import Path
+from platform import uname
 
 # Fixed per request
 DEVICE_ID = "oriole"
@@ -129,7 +130,7 @@ def _download_and_verify_chenxiaolong(repo: str, version: str, artifact: str | N
     artifact_name = artifact or repo
     url = (
         f"https://github.com/chenxiaolong/{repo}/releases/download/v{version}/"
-        f"{artifact_name}-{version}-aarch64-unknown-linux-gnu.zip"
+        f"{artifact_name}-{version}-{uname().machine}-unknown-linux-gnu.zip"
     )
 
     tmp_dir = WORK_DIR / ".tmp"
@@ -333,7 +334,7 @@ def _generate_custota_files(ota_zip: Path, ota_version: str) -> None:
         csig_args += ["--passphrase-env-var", "PASSPHRASE_OTA"]
     _run(csig_args, cwd=WORK_DIR, env=os.environ.copy())
 
-    location = ota_zip.name
+    location = f"../{ota_zip.name}"
     json_path = publish_dir / "magisk" / f"{DEVICE_ID}.json"
     _run(
         [str(tool), "gen-update-info", "--file", str(json_path), "--location", location],
