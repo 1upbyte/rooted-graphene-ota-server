@@ -33,3 +33,21 @@ python3 scripts/release_single.py --host 0.0.0.0 --port 8000
 # Optional: provide passphrases (otherwise rooted-ota.sh may prompt)
 python3 scripts/release_single.py --passphrase-avb '...' --passphrase-ota '...'
 ```
+
+Docker (daily build + HTTP server)
+---
+
+Build the image:
+
+```bash
+docker build -t rooted-ota .
+```
+
+Run the container (builds immediately, then every 24 hours; serves publish/ on port 80):
+
+```bash
+docker run --rm -p 80:80 \
+	-v "$PWD/keys:/app/keys" \
+	-v "$PWD/publish:/app/publish" \
+	rooted-ota
+```

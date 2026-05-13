@@ -1,0 +1,7 @@
+services:
+  rooted-ota:
+    build: .
+    ports:
+      - "8000:80"
+    volumes:
+      - ./keys:/app/keys:ro
