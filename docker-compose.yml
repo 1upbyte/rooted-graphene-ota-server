@@ -5,3 +5,4 @@ services:
       - "8000:80"
     volumes:
       - ./keys:/app/keys:ro
+      - ./publish:/app/publish
