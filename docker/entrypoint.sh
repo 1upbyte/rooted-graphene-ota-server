@@ -15,16 +15,13 @@ start_server() {
   python3 -m http.server 80
 }
 
-# Run first build immediately.
-run_build
-
 # Start HTTP server in background and then rebuild every 24h.
 start_server &
 SERVER_PID=$!
 
 while true; do
-  sleep 86400
   run_build
+  sleep 86400
   # Keep server running unless it has died.
   if ! kill -0 "$SERVER_PID" 2>/dev/null; then
     echo "[entrypoint] HTTP server stopped; restarting"
