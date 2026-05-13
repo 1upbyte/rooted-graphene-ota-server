@@ -11,7 +11,6 @@ run_build() {
 
 start_server() {
   echo "[entrypoint] Starting HTTP server on :80"
-  mkdir -p "$PUBLISH_DIR"
   cd "$PUBLISH_DIR"
   python3 -m http.server 80
 }
