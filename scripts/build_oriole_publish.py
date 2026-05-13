@@ -358,19 +358,18 @@ def main() -> int:
     backup_dir: Path | None = None
     old_dir = publish_dir / "old"
 
-    if publish_dir.exists():
+    publish_dir.mkdir(parents=True, exist_ok=True)
+    old_dir.mkdir(parents=True, exist_ok=True)
+
+    if any(publish_dir.iterdir()):
         suffix = time.strftime("%Y%m%d-%H%M%S")
-        temp_backup = publish_dir.with_name(f"{publish_dir.name}.bak-{suffix}")
-        shutil.move(str(publish_dir), str(temp_backup))
-
-        publish_dir.mkdir(parents=True, exist_ok=True)
-        old_dir.mkdir(parents=True, exist_ok=True)
-
         backup_dir = old_dir / suffix
-        shutil.move(str(temp_backup), str(backup_dir))
-    else:
-        publish_dir.mkdir(parents=True, exist_ok=True)
-        old_dir.mkdir(parents=True, exist_ok=True)
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
+        for entry in publish_dir.iterdir():
+            if entry.name == "old":
+                continue
+            shutil.move(str(entry), str(backup_dir / entry.name))
 
     try:
         magisk_apk = _download_dependencies(magisk_version, ota_target)
