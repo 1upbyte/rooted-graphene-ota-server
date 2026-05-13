@@ -51,9 +51,18 @@ def _eprint(msg: str) -> None:
     print(msg, file=sys.stderr)
 
 
-def _run(args: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> None:
+def _run(
+    args: list[str],
+    *,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    live: bool = False,
+) -> None:
     cmd = " ".join(args)
     _eprint(f"+ {cmd}")
+    if live:
+        subprocess.run(args, cwd=str(cwd) if cwd else None, env=env, check=True)
+        return
     try:
         subprocess.run(
             args,
@@ -298,6 +307,7 @@ def _patch_ota(
         ["uv", "run", "--with-requirements", str(reqs), str(patch_script), *args],
         cwd=WORK_DIR,
         env=env,
+        live=True,
     )
     return output_zip
 
