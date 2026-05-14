@@ -101,7 +101,12 @@ def _read_text_url(url: str) -> str:
 def _latest_ota_version() -> str:
     # GrapheneOS releases endpoint returns a list, first word is version.
     txt = _read_text_url(f"{OTA_BASE_URL}/{DEVICE_ID}-{OTA_CHANNEL}")
-    first_line = txt.splitlines()[0].strip()
+    lines = [line.strip() for line in txt.splitlines() if line.strip()]
+    if not lines:
+        raise SystemExit(
+            f"No OTA versions found at {OTA_BASE_URL}/{DEVICE_ID}-{OTA_CHANNEL}"
+        )
+    first_line = lines[0]
     return first_line.split()[0]
 
 
@@ -205,7 +210,9 @@ def _download_modules() -> None:
             f"v{CUSTOTA_VERSION}/Custota-{CUSTOTA_VERSION}-release.zip"
         )
         _download(url, custota_zip)
-        _download(url + ".sig", tmp_dir / "custota.zip.sig")
+        custota_sig = tmp_dir / "custota.zip.sig"
+        _download(url + ".sig", custota_sig)
+        _verify_sig(custota_zip, custota_sig)
 
     oemunlock_zip = tmp_dir / "oemunlockonboot.zip"
     if not oemunlock_zip.exists():
@@ -214,7 +221,18 @@ def _download_modules() -> None:
             f"v{OEMUNLOCKONBOOT_VERSION}/OEMUnlockOnBoot-{OEMUNLOCKONBOOT_VERSION}-release.zip"
         )
         _download(url, oemunlock_zip)
-        _download(url + ".sig", tmp_dir / "oemunlockonboot.zip.sig")
+        oemunlock_sig = tmp_dir / "oemunlockonboot.zip.sig"
+        _download(url + ".sig", oemunlock_sig)
+        _verify_sig(oemunlock_zip, oemunlock_sig)
+
+
+def _require_key_material() -> None:
+    required = [KEYS_DIR / "avb.key", KEYS_DIR / "ota.key", KEYS_DIR / "ota.crt"]
+    missing = [str(p) for p in required if not p.exists()]
+    if missing:
+        raise SystemExit(
+            "Missing required key files in keys/: " + ", ".join(missing)
+        )
 
 
 def _download_dependencies(magisk_version: str, ota_target: str) -> Path:
@@ -237,6 +255,19 @@ def _git_short_rev(repo_root: Path) -> str:
         return "local"
 
 
+def _asset_name(ota_version: str, magisk_version: str, commit: str) -> str:
+    return f"{DEVICE_ID}-{ota_version}-{commit}-magisk-{magisk_version}.zip"
+
+
+def _published_artifacts_exist(ota_version: str, magisk_version: str) -> bool:
+    commit = _git_short_rev(REPO_ROOT)
+    name = _asset_name(ota_version, magisk_version, commit)
+    publish_zip = publish_dir / name
+    publish_csig = publish_dir / f"{name}.csig"
+    update_json = publish_dir / "magisk" / f"{DEVICE_ID}.json"
+    return publish_zip.exists() and publish_csig.exists() and update_json.exists()
+
+
 def _patch_ota(
     *,
     ota_target: str,
@@ -247,7 +278,7 @@ def _patch_ota(
     tmp_dir = WORK_DIR / ".tmp"
     commit = _git_short_rev(REPO_ROOT)
 
-    asset_name = f"{DEVICE_ID}-{ota_version}-{commit}-magisk-{magisk_version}.zip"
+    asset_name = _asset_name(ota_version, magisk_version, commit)
     output_zip = tmp_dir / asset_name
     if output_zip.exists():
         return output_zip
@@ -378,6 +409,12 @@ def main() -> int:
     _eprint(f"OTA target: {ota_target}")
 
     publish_dir.mkdir(parents=True, exist_ok=True)
+    if _published_artifacts_exist(ota_version, magisk_version):
+        _eprint("Publish artifacts already exist; skipping download/patch/sign")
+        _cleanup_old_versions()
+        return 0
+
+    _require_key_material()
 
     magisk_apk = _download_dependencies(magisk_version, ota_target)
     ota_zip = _patch_ota(
@@ -397,7 +434,7 @@ def main() -> int:
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-WORK_DIR = REPO_ROOT / ".work" / "oriole"
+WORK_DIR = REPO_ROOT / ".work"
 KEYS_DIR = REPO_ROOT / "keys"
 publish_dir = REPO_ROOT / "publish"
 

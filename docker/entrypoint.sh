@@ -9,23 +9,18 @@ run_build() {
   uv run "$APP_DIR/scripts/build_oriole_publish.py"
 }
 
-start_server() {
-  echo "[entrypoint] Starting HTTP server on :80"
-  cd "$PUBLISH_DIR"
-  python3 -m http.server 80
+build_loop() {
+  while true; do
+    run_build
+    sleep 86400
+  done
 }
 
-# Start HTTP server in background and then rebuild every 24h.
-start_server &
-SERVER_PID=$!
+# Ensure publish dir exists
+mkdir -p "$PUBLISH_DIR"
 
-while true; do
-  run_build
-  sleep 86400
-  # Keep server running unless it has died.
-  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-    echo "[entrypoint] HTTP server stopped; restarting"
-    start_server &
-    SERVER_PID=$!
-  fi
-done
+# Start build loop in background
+build_loop &
+
+# Start nginx in foreground (so Docker keeps the container running)
+exec nginx -g 'daemon off;'

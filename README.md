@@ -11,10 +11,10 @@ https://rooted-graphene.github.io/ota/
 Local / CI usage
 ---
 
-To build a single device OTA and host it locally (defaults: `device-id=oriole`, `magisk-preinit-device=metadata`):
+To build a single device OTA locally (defaults: `device-id=oriole`, `magisk-preinit-device=metadata`):
 
 ```bash
-python3 scripts/release_single.py
+python3 scripts/build_oriole_publish.py
 ```
 
 Signing material is read from files by default:
@@ -26,12 +26,11 @@ Signing material is read from files by default:
 Common overrides:
 
 ```bash
-python3 scripts/release_single.py --device-id oriole --magisk-preinit-device metadata
-python3 scripts/release_single.py --no-serve
-python3 scripts/release_single.py --host 0.0.0.0 --port 8000
+MAGISK_VERSION=v30.7 python3 scripts/build_oriole_publish.py
+OTA_VERSION=latest python3 scripts/build_oriole_publish.py
 
 # Optional: provide passphrases (otherwise rooted-ota.sh may prompt)
-python3 scripts/release_single.py --passphrase-avb '...' --passphrase-ota '...'
+PASSPHRASE_AVB='...' PASSPHRASE_OTA='...' python3 scripts/build_oriole_publish.py
 ```
 
 Docker (daily build + HTTP server)
