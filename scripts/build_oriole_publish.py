@@ -174,8 +174,8 @@ def _download_magisk(magisk_version: str) -> Path:
     apk = tmp_dir / f"magisk-{magisk_version}.apk"
     if not apk.exists():
         url = (
-            "https://github.com/topjohnwu/Magisk/releases/download/"
-            f"{magisk_version}/Magisk-{magisk_version}.apk"
+            "https://github.com/pixincreate/Magisk/releases/download/"
+            f"{magisk_version}/app-release.apk"
         )
         _download(url, apk)
     return apk
