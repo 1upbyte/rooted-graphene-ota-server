@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-"""Download, Magisk-patch, and sign a single OTA for oriole.
+"""Download, patch, and sign OTAs for oriole.
 
 This script follows the download and patch flow from rooted-ota.sh but keeps it
 local and minimal. It:
-- downloads the latest GrapheneOS OTA for oriole
-- patches it with Magisk (preinit device: metadata)
-- signs the OTA with keys from the local keys/ folder
-- writes Custota files into publish/
+-- downloads the latest GrapheneOS OTA for oriole
+-- produces a rooted (Magisk) and a non-rooted OTA
+-- signs the OTAs with keys from the local keys/ folder
+-- writes Custota files into publish/
 
 Outputs:
-- publish/<ota-zip>
-- publish/<ota-zip>.csig
+- publish/<rooted-ota-zip>
+- publish/<rooted-ota-zip>.csig
 - publish/magisk/oriole.json
+- publish/<rootless-ota-zip>
+- publish/<rootless-ota-zip>.csig
+- publish/rootless/oriole.json
 """
 
 from __future__ import annotations
@@ -235,12 +238,19 @@ def _require_key_material() -> None:
         )
 
 
-def _download_dependencies(magisk_version: str, ota_target: str) -> Path:
+def _download_dependencies(
+    *,
+    magisk_version: str,
+    ota_target: str,
+    needs_magisk: bool,
+    needs_modules: bool,
+) -> Path | None:
     _download_and_verify_chenxiaolong("avbroot", AVB_ROOT_VERSION)
     _download_and_verify_chenxiaolong("afsr", AFSR_VERSION)
-    _download_modules()
+    if needs_modules:
+        _download_modules()
     _clone_my_avbroot_setup()
-    magisk_apk = _download_magisk(magisk_version)
+    magisk_apk = _download_magisk(magisk_version) if needs_magisk else None
     _download_ota(ota_target)
     return magisk_apk
 
@@ -255,16 +265,38 @@ def _git_short_rev(repo_root: Path) -> str:
         return "local"
 
 
-def _asset_name(ota_version: str, magisk_version: str, commit: str) -> str:
-    return f"{DEVICE_ID}-{ota_version}-{commit}-magisk-{magisk_version}.zip"
+def _asset_name(
+    *,
+    ota_version: str,
+    commit: str,
+    build_type: str,
+    magisk_version: str | None = None,
+) -> str:
+    if build_type == "magisk":
+        if not magisk_version:
+            raise ValueError("magisk_version is required for magisk builds")
+        return f"{DEVICE_ID}-{ota_version}-{commit}-magisk-{magisk_version}.zip"
+    if build_type == "rootless":
+        return f"{DEVICE_ID}-{ota_version}-{commit}-rootless.zip"
+    raise ValueError(f"Unknown build type: {build_type}")
 
 
-def _published_artifacts_exist(ota_version: str, magisk_version: str) -> bool:
+def _published_artifacts_exist(
+    *,
+    ota_version: str,
+    build_type: str,
+    magisk_version: str | None = None,
+) -> bool:
     commit = _git_short_rev(REPO_ROOT)
-    name = _asset_name(ota_version, magisk_version, commit)
+    name = _asset_name(
+        ota_version=ota_version,
+        commit=commit,
+        build_type=build_type,
+        magisk_version=magisk_version,
+    )
     publish_zip = publish_dir / name
     publish_csig = publish_dir / f"{name}.csig"
-    update_json = publish_dir / "magisk" / f"{DEVICE_ID}.json"
+    update_json = publish_dir / build_type / f"{DEVICE_ID}.json"
     return publish_zip.exists() and publish_csig.exists() and update_json.exists()
 
 
@@ -272,13 +304,19 @@ def _patch_ota(
     *,
     ota_target: str,
     ota_version: str,
-    magisk_version: str,
-    magisk_apk: Path,
+    build_type: str,
+    magisk_version: str | None,
+    magisk_apk: Path | None,
 ) -> Path:
     tmp_dir = WORK_DIR / ".tmp"
     commit = _git_short_rev(REPO_ROOT)
 
-    asset_name = _asset_name(ota_version, magisk_version, commit)
+    asset_name = _asset_name(
+        ota_version=ota_version,
+        commit=commit,
+        build_type=build_type,
+        magisk_version=magisk_version,
+    )
     output_zip = tmp_dir / asset_name
     if output_zip.exists():
         return output_zip
@@ -301,18 +339,26 @@ def _patch_ota(
         str(key_ota),
         "--sign-cert-ota",
         str(cert_ota),
-        "--patch-arg=--magisk",
-        "--patch-arg",
-        str(magisk_apk),
-        "--patch-arg=--magisk-preinit-device",
-        "--patch-arg",
-        MAGISK_PREINIT_DEVICE,
-        "--module-custota",
-        str(tmp_dir / "custota.zip"),
-        "--module-oemunlockonboot",
-        str(tmp_dir / "oemunlockonboot.zip"),
         "--skip-custota-tool",
     ]
+
+    if build_type == "magisk":
+        if not magisk_apk:
+            raise SystemExit("Missing Magisk APK for magisk build")
+        args += [
+            "--patch-arg=--magisk",
+            "--patch-arg",
+            str(magisk_apk),
+            "--patch-arg=--magisk-preinit-device",
+            "--patch-arg",
+            MAGISK_PREINIT_DEVICE,
+            "--module-custota",
+            str(tmp_dir / "custota.zip"),
+            "--module-oemunlockonboot",
+            str(tmp_dir / "oemunlockonboot.zip"),
+        ]
+    elif build_type != "rootless":
+        raise SystemExit(f"Unknown build type: {build_type}")
 
     env = os.environ.copy()
     if os.environ.get("PASSPHRASE_AVB"):
@@ -351,9 +397,10 @@ def _download_custota_tool() -> Path:
     return tool
 
 
-def _generate_custota_files(ota_zip: Path, ota_version: str) -> None:
+def _generate_custota_files(ota_zip: Path, ota_version: str, build_type: str) -> None:
     publish_dir.mkdir(parents=True, exist_ok=True)
-    (publish_dir / "magisk").mkdir(parents=True, exist_ok=True)
+    channel_dir = publish_dir / build_type
+    channel_dir.mkdir(parents=True, exist_ok=True)
 
     tool = _download_custota_tool()
 
@@ -375,7 +422,7 @@ def _generate_custota_files(ota_zip: Path, ota_version: str) -> None:
     _run(csig_args, cwd=WORK_DIR, env=os.environ.copy())
 
     location = f"../{ota_zip.name}"
-    json_path = publish_dir / "magisk" / f"{DEVICE_ID}.json"
+    json_path = channel_dir / f"{DEVICE_ID}.json"
     _run(
         [str(tool), "gen-update-info", "--file", str(json_path), "--location", location],
         cwd=WORK_DIR,
@@ -384,16 +431,20 @@ def _generate_custota_files(ota_zip: Path, ota_version: str) -> None:
 
 
 def _cleanup_old_versions() -> None:
-    zips = sorted(
-        publish_dir.glob(f"{DEVICE_ID}-*-magisk-*.zip"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    for old_zip in zips[2:]:
-        old_zip.unlink()
-        csig = publish_dir / f"{old_zip.name}.csig"
-        if csig.exists():
-            csig.unlink()
+    def _cleanup(pattern: str) -> None:
+        zips = sorted(
+            publish_dir.glob(pattern),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for old_zip in zips[2:]:
+            old_zip.unlink()
+            csig = publish_dir / f"{old_zip.name}.csig"
+            if csig.exists():
+                csig.unlink()
+
+    _cleanup(f"{DEVICE_ID}-*-magisk-*.zip")
+    _cleanup(f"{DEVICE_ID}-*-rootless.zip")
 
 
 def main() -> int:
@@ -409,24 +460,57 @@ def main() -> int:
     _eprint(f"OTA target: {ota_target}")
 
     publish_dir.mkdir(parents=True, exist_ok=True)
-    if _published_artifacts_exist(ota_version, magisk_version):
+    magisk_exists = _published_artifacts_exist(
+        ota_version=ota_version,
+        build_type="magisk",
+        magisk_version=magisk_version,
+    )
+    rootless_exists = _published_artifacts_exist(
+        ota_version=ota_version,
+        build_type="rootless",
+    )
+    if magisk_exists and rootless_exists:
         _eprint("Publish artifacts already exist; skipping download/patch/sign")
         _cleanup_old_versions()
         return 0
 
     _require_key_material()
 
-    magisk_apk = _download_dependencies(magisk_version, ota_target)
-    ota_zip = _patch_ota(
-        ota_target=ota_target,
-        ota_version=ota_version,
-        magisk_version=magisk_version,
-        magisk_apk=magisk_apk,
-    )
+    if not magisk_exists:
+        magisk_apk = _download_dependencies(
+            magisk_version=magisk_version,
+            ota_target=ota_target,
+            needs_magisk=True,
+            needs_modules=True,
+        )
+        ota_zip = _patch_ota(
+            ota_target=ota_target,
+            ota_version=ota_version,
+            build_type="magisk",
+            magisk_version=magisk_version,
+            magisk_apk=magisk_apk,
+        )
+        publish_zip = publish_dir / ota_zip.name
+        shutil.copy2(ota_zip, publish_zip)
+        _generate_custota_files(publish_zip, ota_version, "magisk")
 
-    publish_zip = publish_dir / ota_zip.name
-    shutil.copy2(ota_zip, publish_zip)
-    _generate_custota_files(publish_zip, ota_version)
+    if not rootless_exists:
+        _download_dependencies(
+            magisk_version=magisk_version,
+            ota_target=ota_target,
+            needs_magisk=False,
+            needs_modules=False,
+        )
+        ota_zip = _patch_ota(
+            ota_target=ota_target,
+            ota_version=ota_version,
+            build_type="rootless",
+            magisk_version=None,
+            magisk_apk=None,
+        )
+        publish_zip = publish_dir / ota_zip.name
+        shutil.copy2(ota_zip, publish_zip)
+        _generate_custota_files(publish_zip, ota_version, "rootless")
     _cleanup_old_versions()
 
     _eprint(f"Done. Publish folder: {publish_dir}")
